@@ -1,17 +1,21 @@
 package tasks
 
 import (
+	"context"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type Task struct {
-	ID            int    `json:"id"`
-	ExpressionID  int    `json:"expression"`
-	Operator      string `json:"operation"`
-	Arg1          int    `json:"arg1"`
-	Arg2          int    `json:"arg2"`
-	OperationTime int    `json:"operation_time"`
+	ID               int                `json:"id"`
+	ExpressionID     int                `json:"expression"`
+	Operator         string             `json:"operation"`
+	Arg1             int                `json:"arg1"`
+	Arg2             int                `json:"arg2"`
+	OperationTime    int                `json:"operation_time"`
+	TimeoutTimestamp time.Time          `json:"timeout_timestamp"`
+	ContextCancel    context.CancelFunc `json:"-"`
 }
 
 type Tasks struct {

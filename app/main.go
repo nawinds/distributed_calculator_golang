@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"distributed_calculator/agent"
 	"distributed_calculator/config"
 	"distributed_calculator/evaluation"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Expression struct {
@@ -71,7 +73,6 @@ func addExpression(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Println("Postfix Expression:", strings.Join(postfix, " "))
-
 	new_postfix, err := evaluation.EvaluatePostfix(id, tasksList, postfix)
 	if err != nil {
 		if err.Error() != "unready warning" {
@@ -161,12 +162,18 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 		defer tasksList.Mx.Unlock()
 		if len(tasksList.Tasks) > 0 {
 			for _, task := range tasksList.Tasks {
-				w.Header().Set("Content-Type", "application/json")
-				err := json.NewEncoder(w).Encode(map[string]*tasks.Task{"task": task})
-				if err != nil {
-					http.Error(w, "json encode error", http.StatusInternalServerError)
+				if task.TimeoutTimestamp.Before(time.Now()) || task.TimeoutTimestamp.IsZero() {
+
+					task.TimeoutTimestamp = time.Now().Add(
+						time.Duration(task.OperationTime) * time.Millisecond * 2)
+
+					w.Header().Set("Content-Type", "application/json")
+					err := json.NewEncoder(w).Encode(map[string]*tasks.Task{"task": task})
+					if err != nil {
+						http.Error(w, "json encode error", http.StatusInternalServerError)
+					}
+					return
 				}
-				return
 			}
 		}
 		http.Error(w, "No task found", http.StatusNotFound)
@@ -208,27 +215,53 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 
 		expressionsList.Mx.Unlock()
 
-		new_postfix, err := evaluation.EvaluatePostfix(exprID, tasksList, exprPostfix)
-		if err != nil {
-			if err.Error() != "unready warning" {
-				fmt.Println("Error:", err)
-				return
+		done := make(chan []string)
+		err_chan := make(chan error)
+
+		ctx := context.Background()
+		ctxWithCancel, cancelCtx := context.WithCancel(ctx)
+
+		for _, task := range tasksList.Tasks {
+			if task.ContextCancel != nil {
+				task.ContextCancel()
 			}
-			expressionsList.Mx.Lock()
-			expr.Postfix = new_postfix
-			expressionsList.Mx.Unlock()
-		} else {
-			expressionsList.Mx.Lock()
-			fmt.Println(new_postfix)
-			res, e := strconv.Atoi(new_postfix[0])
-			if e != nil {
-				http.Error(w, "postfix not integer", http.StatusInternalServerError)
+		}
+
+		task.ContextCancel = cancelCtx
+		go func(exprID int, tasksList *tasks.Tasks, exprPostfix []string) {
+			postfix, err := evaluation.EvaluatePostfix(exprID, tasksList, exprPostfix)
+			done <- postfix
+			err_chan <- err
+			close(done)
+			close(err_chan)
+		}(exprID, tasksList, exprPostfix)
+
+		select {
+		case new_postfix := <-done:
+			err := <-err_chan
+			if err != nil {
+				if err.Error() != "unready warning" {
+					fmt.Println("Error:", err)
+					return
+				}
+				expressionsList.Mx.Lock()
+				expr.Postfix = new_postfix
 				expressionsList.Mx.Unlock()
-				return
+			} else {
+				expressionsList.Mx.Lock()
+				fmt.Println(new_postfix)
+				res, e := strconv.Atoi(new_postfix[0])
+				if e != nil {
+					http.Error(w, "postfix not integer", http.StatusInternalServerError)
+					expressionsList.Mx.Unlock()
+					return
+				}
+				expr.Result = res
+				expr.Status = "Done"
+				expressionsList.Mx.Unlock()
 			}
-			expr.Result = res
-			expr.Status = "Done"
-			expressionsList.Mx.Unlock()
+		case <-ctxWithCancel.Done():
+			fmt.Println("Task did not complete:", ctxWithCancel.Err())
 		}
 
 		tasksList.Mx.Lock()

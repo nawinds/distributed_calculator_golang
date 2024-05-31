@@ -15,7 +15,7 @@ var (
 )
 
 func init() {
-	COMPUTING_POWER, e = strconv.Atoi(os.Getenv("COMPUTING_POWER"))
+	COMPUTING_POWER, e = 1, nil //strconv.Atoi(os.Getenv("COMPUTING_POWER"))
 	if e != nil {
 		panic("COMPUTING_POWER environment variable must be integer")
 	}
@@ -27,7 +27,7 @@ func init() {
 
 	TIME_SUBTRACTION_MS, e = strconv.Atoi(os.Getenv("TIME_SUBTRACTION_MS"))
 	if e != nil {
-		panic("TIME_SUBSTRACTION_MS environment variable must be integer")
+		panic("TIME_SUBTRACTION_MS environment variable must be integer")
 	}
 
 	TIME_MULTIPLICATION_MS, e = strconv.Atoi(os.Getenv("TIME_MULTIPLICATIONS_MS"))
