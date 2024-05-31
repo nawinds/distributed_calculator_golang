@@ -1,22 +1,24 @@
 package evaluation
 
 import (
+	"distributed_calculator/config"
 	"distributed_calculator/tasks"
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode"
 )
 
 var precedence = map[rune]int{
 	'+': 1,
-	'-': 1,
+	'>': 1,
 	'*': 2,
 	'/': 2,
 }
 
 var associativity = map[rune]string{
 	'+': "L",
-	'-': "L",
+	'>': "L",
 	'*': "L",
 	'/': "L",
 }
@@ -25,11 +27,13 @@ func InfixToPostfix(expression string) ([]string, error) {
 	var output []string
 	var operatorStack []rune
 
+	expression = strings.ReplaceAll(expression, "-", ">")
+
 	for _, token := range expression {
 		switch {
 		case unicode.IsDigit(token):
 			output = append(output, string(token))
-		case token == '+' || token == '-' || token == '*' || token == '/':
+		case token == '+' || token == '>' || token == '*' || token == '/':
 			for len(operatorStack) > 0 {
 				top := operatorStack[len(operatorStack)-1]
 				if top == '(' {
@@ -82,7 +86,12 @@ func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, postfix []string) ([]
 		}
 		fmt.Println(stack, i, postfix)
 		switch postfix[i] {
-		case "+", "-", "*", "/":
+		case "+", ">", "*", "/":
+			if len(stack) < 2 {
+				stack = []string{}
+				i++
+				continue
+			}
 			b, errB := strconv.Atoi(stack[len(stack)-1])
 			if errB != nil {
 				i++
@@ -101,15 +110,14 @@ func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, postfix []string) ([]
 
 			switch postfix[i] {
 			case "+":
-				taskID = tasks.AddTask(expressionID, "+", a, b)
-			case "-":
-				taskID = tasks.AddTask(expressionID, "-", a, b)
+				taskID = tasks.AddTask(config.TIME_ADDITION_MS, expressionID, "+", a, b)
+			case ">":
+				taskID = tasks.AddTask(config.TIME_SUBTRACTION_MS, expressionID, "-", a, b)
 			case "*":
-				taskID = tasks.AddTask(expressionID, "*", a, b)
+				taskID = tasks.AddTask(config.TIME_MULTIPLICATION_MS, expressionID, "*", a, b)
 			case "/":
-				taskID = tasks.AddTask(expressionID, "/", a, b)
+				taskID = tasks.AddTask(config.TIME_DIVISION_MS, expressionID, "/", a, b)
 			}
-			stack = append(stack, "t"+taskID)
 			postfix = append(postfix[:i+1], append([]string{"t" + taskID}, postfix[i+1:]...)...)
 
 			for j := i; j >= i-2; j-- {
@@ -123,6 +131,7 @@ func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, postfix []string) ([]
 		default:
 			num, err := strconv.Atoi(postfix[i])
 			if err != nil {
+				stack = []string{}
 				i++
 				continue
 			}
