@@ -1,0 +1,7 @@
+POST http://localhost:8080/internal/task
+Content-Type: application/json
+
+{
+  "id": 4,
+  "result": 1
+}
