@@ -24,19 +24,19 @@ type Expression struct {
 	Result     int
 }
 
-type ExpressionItem struct {
+type ExpressionItem struct { // структура выражения для вывода в API
 	ID     int
 	Status string
 	Result int
 }
 
 type Expressions struct {
-	Expressions map[int]*Expression
+	Expressions map[int]*Expression // мапа с очередью выражений
 	Mx          *sync.Mutex
-	LastID      int
+	LastID      int // последний использованный id
 }
 
-type ExpressionResponse struct {
+type ExpressionResponse struct { // структура для возврата списка выражений через API
 	Expressions []ExpressionItem
 }
 
@@ -49,11 +49,11 @@ func NewExpressions() *Expressions {
 	return &Expressions{Mx: &sync.Mutex{}, LastID: 0, Expressions: make(map[int]*Expression)}
 }
 
-func newExpression(id int, exp string) *Expression {
+func NewExpression(id int, exp string) *Expression {
 	return &Expression{ID: id, Expression: exp, Status: "Processing"}
 }
 
-func addExpression(w http.ResponseWriter, r *http.Request) {
+func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	type RequestData struct {
 		Expression string `json:"expression"`
 	}
@@ -64,12 +64,13 @@ func addExpression(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&data)
 	expression := data.Expression
-
+	expressionsList.Mx.Lock()
 	id := expressionsList.LastID + 1
-	new_expression := newExpression(id, expression)
+	new_expression := NewExpression(id, expression)
 	postfix, err := evaluation.InfixToPostfix(expression)
 	if err != nil {
 		fmt.Println("Error:", err)
+		expressionsList.Mx.Unlock()
 		return
 	}
 	fmt.Println("Postfix Expression:", strings.Join(postfix, " "))
@@ -77,11 +78,11 @@ func addExpression(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err.Error() != "unready warning" {
 			fmt.Println("Error:", err)
+			expressionsList.Mx.Unlock()
 			return
 		}
 		new_expression.Postfix = new_postfix
 	}
-	expressionsList.Mx.Lock()
 	expressionsList.Expressions[expressionsList.LastID+1] = new_expression
 	expressionsList.LastID++
 	expressionsList.Mx.Unlock()
@@ -96,7 +97,7 @@ func addExpression(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(expression)
 }
 
-func getExpressions(w http.ResponseWriter, _ *http.Request) {
+func getExpressionsHandler(w http.ResponseWriter, _ *http.Request) {
 	var expressions []ExpressionItem
 
 	expressionsList.Mx.Lock()
@@ -122,7 +123,7 @@ func getExpressions(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func getExpression(w http.ResponseWriter, r *http.Request) {
+func getExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	idStr := vars["id"]
 	id, err := strconv.Atoi(idStr)
@@ -156,7 +157,7 @@ func getExpression(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getTask(w http.ResponseWriter, r *http.Request) {
+func getTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		tasksList.Mx.Lock()
 		defer tasksList.Mx.Unlock()
@@ -196,6 +197,7 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 			tasksList.Mx.Unlock()
 			return
 		}
+		fmt.Println("Task ID:", result.ID)
 		tasksList.Mx.Unlock()
 
 		expressionsList.Mx.Lock()
@@ -283,10 +285,10 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	r := mux.NewRouter()
-	r.HandleFunc("/api/v1/calculate", addExpression).Methods("POST")
-	r.HandleFunc("/api/v1/expressions", getExpressions).Methods("GET")
-	r.HandleFunc("/api/v1/expressions/{id}", getExpression).Methods("GET")
-	r.HandleFunc("/internal/task", getTask).Methods("GET", "POST")
+	r.HandleFunc("/api/v1/calculate", addExpressionHandler).Methods("POST")
+	r.HandleFunc("/api/v1/expressions", getExpressionsHandler).Methods("GET")
+	r.HandleFunc("/api/v1/expressions/{id}", getExpressionHandler).Methods("GET")
+	r.HandleFunc("/internal/task", getTaskHandler).Methods("GET", "POST")
 
 	for i := 0; i < config.COMPUTING_POWER; i++ {
 		go agent.Worker()

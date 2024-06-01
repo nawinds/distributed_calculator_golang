@@ -4,6 +4,7 @@ import (
 	"distributed_calculator/config"
 	"distributed_calculator/tasks"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 	"unicode"
@@ -74,6 +75,8 @@ func InfixToPostfix(expression string) ([]string, error) {
 }
 
 func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, postfix []string) ([]string, error) {
+	calcID := rand.Intn(rand.Intn(100))
+	fmt.Println("INPUT POSTFIX:", postfix)
 	if len(postfix) == 1 {
 		return postfix, nil
 	}
@@ -84,7 +87,7 @@ func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, postfix []string) ([]
 		if i >= len(postfix) {
 			break
 		}
-		fmt.Println(stack, i, postfix)
+		fmt.Println(calcID, stack, i, postfix)
 		switch postfix[i] {
 		case "+", ">", "*", "/":
 			if len(stack) < 2 {

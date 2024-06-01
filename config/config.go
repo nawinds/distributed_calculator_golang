@@ -15,7 +15,7 @@ var (
 )
 
 func init() {
-	COMPUTING_POWER, e = 1, nil //strconv.Atoi(os.Getenv("COMPUTING_POWER"))
+	COMPUTING_POWER, e = 1, nil
 	if e != nil {
 		panic("COMPUTING_POWER environment variable must be integer")
 	}
