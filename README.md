@@ -12,13 +12,21 @@ cd distributed_calculator_golang
 ```
 
 ### Установка переменных окружения:
-
+Linux/macOS:
 ```cmd
 export COMPUTING_POWER=1
 export TIME_ADDITION_MS=1000
 export TIME_SUBTRACTION_MS=1000
 export TIME_MULTIPLICATIONS_MS=1000
 export TIME_DIVISIONS_MS=1000
+```
+Windows:
+```cmd
+set COMPUTING_POWER=1
+set TIME_ADDITION_MS=1000
+set TIME_SUBTRACTION_MS=1000
+set TIME_MULTIPLICATIONS_MS=1000
+set TIME_DIVISIONS_MS=1000
 ```
 
 ### Установка модулей:
