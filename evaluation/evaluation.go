@@ -74,9 +74,12 @@ func InfixToPostfix(expression string) ([]string, error) {
 	return output, nil
 }
 
-func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, postfix []string) ([]string, error) {
+func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, originalPostfix []string) ([]string, error) {
+	postfix := make([]string, len(originalPostfix))
+	copy(postfix, originalPostfix)
+
 	calcID := rand.Intn(rand.Intn(100))
-	fmt.Println("INPUT POSTFIX:", postfix)
+	fmt.Println(calcID, "INPUT POSTFIX:", postfix)
 	if len(postfix) == 1 {
 		return postfix, nil
 	}

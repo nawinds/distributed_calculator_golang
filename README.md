@@ -14,7 +14,7 @@ cd distributed_calculator_golang
 ### Установка переменных окружения:
 Linux/macOS:
 ```cmd
-export COMPUTING_POWER=1
+export COMPUTING_POWER=3
 export TIME_ADDITION_MS=1000
 export TIME_SUBTRACTION_MS=1000
 export TIME_MULTIPLICATIONS_MS=1000
@@ -22,7 +22,7 @@ export TIME_DIVISIONS_MS=1000
 ```
 Windows:
 ```cmd
-set COMPUTING_POWER=1
+set COMPUTING_POWER=3
 set TIME_ADDITION_MS=1000
 set TIME_SUBTRACTION_MS=1000
 set TIME_MULTIPLICATIONS_MS=1000
@@ -168,5 +168,5 @@ curl --location 'http://localhost:8080/api/v1/expressions/1'
 Функция загрузки результата выполнения задачи на сервер
 
 ## Примечание:
-Вместо оператора - иногда используется символ <, чтобы избежать проблем 
+Вместо оператора "-" иногда используется символ <, чтобы избежать проблем 
 с отрицательными числами
