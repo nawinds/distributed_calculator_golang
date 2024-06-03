@@ -4,7 +4,6 @@ import (
 	"distributed_calculator/config"
 	"distributed_calculator/tasks"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"strings"
 	"unicode"
@@ -28,7 +27,7 @@ func InfixToPostfix(expression string) ([]string, error) {
 	var output []string
 	var operatorStack []rune
 
-	expression = strings.ReplaceAll(expression, "-", ">")
+	expression = strings.ReplaceAll(expression, "-", ">") // для лучшей обработки отрицательных чисел
 
 	for _, token := range expression {
 		switch {
@@ -60,6 +59,8 @@ func InfixToPostfix(expression string) ([]string, error) {
 				return nil, fmt.Errorf("mismatched parentheses")
 			}
 			operatorStack = operatorStack[:len(operatorStack)-1]
+		default:
+			return nil, fmt.Errorf("invalid token: %v", string(token))
 		}
 	}
 
@@ -78,8 +79,7 @@ func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, originalPostfix []str
 	postfix := make([]string, len(originalPostfix))
 	copy(postfix, originalPostfix)
 
-	calcID := rand.Intn(rand.Intn(100))
-	fmt.Println(calcID, "INPUT POSTFIX:", postfix)
+	fmt.Println("INPUT POSTFIX:", postfix)
 	if len(postfix) == 1 {
 		return postfix, nil
 	}
@@ -90,7 +90,7 @@ func EvaluatePostfix(expressionID int, tasks *tasks.Tasks, originalPostfix []str
 		if i >= len(postfix) {
 			break
 		}
-		fmt.Println(calcID, stack, i, postfix)
+		fmt.Println(stack, i, postfix)
 		switch postfix[i] {
 		case "+", ">", "*", "/":
 			if len(stack) < 2 {

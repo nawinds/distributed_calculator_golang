@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"distributed_calculator/expression_structs"
 	"fmt"
 	"strconv"
 	"sync"
@@ -52,7 +53,7 @@ func (t *Tasks) AddTask(time, expressionID int, operator string, arg1, arg2 int)
 	return strconv.Itoa(new_id)
 }
 
-func (t *Tasks) GetTask() (*Task, error) {
+func (t *Tasks) GetTask(expressionsList *expression_structs.Expressions) (*Task, error) {
 	t.Mx.Lock()
 	defer t.Mx.Unlock()
 
@@ -61,14 +62,14 @@ func (t *Tasks) GetTask() (*Task, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Millisecond*time.Duration(task.OperationTime))
 			task.ContextCancel = cancel
 			task.TimeoutTimestamp = time.Now().Add(2 * time.Millisecond * time.Duration(task.OperationTime))
-			go t.monitorTask(ctx, task.ID)
+			go t.monitorTask(ctx, task.ID, expressionsList)
 			return task, nil
 		}
 	}
 	return nil, fmt.Errorf("no task found")
 }
 
-func (t *Tasks) monitorTask(ctx context.Context, taskID int) {
+func (t *Tasks) monitorTask(ctx context.Context, taskID int, expressionList *expression_structs.Expressions) {
 	<-ctx.Done()
 	t.Mx.Lock()
 	defer t.Mx.Unlock()
@@ -76,6 +77,23 @@ func (t *Tasks) monitorTask(ctx context.Context, taskID int) {
 		if time.Now().After(task.TimeoutTimestamp) {
 			fmt.Printf("Task #%d timed out and was removed\n", taskID)
 			delete(t.Tasks, taskID)
+
+			expressionList.Mx.Lock()
+			for _, expr := range expressionList.Expressions {
+				if expr.ID == task.ExpressionID {
+					expr.Status = "Error: timeout"
+				}
+			}
+			expressionList.Mx.Unlock()
+
+			for _, tsk := range t.Tasks {
+				if tsk.ExpressionID == task.ExpressionID {
+					_, err := t.CompleteTask(tsk.ID)
+					if err != nil {
+						fmt.Printf("Error: %v\n", err)
+					}
+				}
+			}
 		}
 	}
 }

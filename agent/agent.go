@@ -19,8 +19,8 @@ func Worker() {
 			continue
 		}
 
-		result := performTask(task)
-		postTaskResult(task.ID, result)
+		result, e := performTask(task)
+		postTaskResult(task.ID, result, e)
 	}
 }
 
@@ -51,7 +51,7 @@ func getTask() (*tasks.Task, error) {
 	return &taskResponse.Task, nil
 }
 
-func performTask(task *tasks.Task) int {
+func performTask(task *tasks.Task) (int, error) {
 	time.Sleep(time.Duration(task.OperationTime) * time.Millisecond)
 
 	arg1 := task.Arg1
@@ -59,21 +59,32 @@ func performTask(task *tasks.Task) int {
 
 	switch task.Operator {
 	case "+":
-		return arg1 + arg2
+		return arg1 + arg2, nil
 	case "-":
-		return arg1 - arg2
+		return arg1 - arg2, nil
 	case "*":
-		return arg1 * arg2
+		return arg1 * arg2, nil
 	case "/":
-		return arg1 / arg2
+		if arg2 != 0 {
+			return arg1 / arg2, nil
+		} else {
+			return 0, fmt.Errorf("division by zero")
+		}
 	}
-	return 0
+	return 0, fmt.Errorf("unknown operator")
 }
 
-func postTaskResult(id, result int) {
+func postTaskResult(id, result int, e error) {
+	errString := ""
+	if e != nil {
+		errString = e.Error()
+	} else {
+		errString = ""
+	}
 	resultData := map[string]interface{}{
 		"id":     id,
 		"result": result,
+		"error":  errString,
 	}
 
 	data, _ := json.Marshal(resultData)

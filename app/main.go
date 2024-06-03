@@ -4,6 +4,7 @@ import (
 	"distributed_calculator/agent"
 	"distributed_calculator/config"
 	"distributed_calculator/evaluation"
+	"distributed_calculator/expression_structs"
 	"distributed_calculator/tasks"
 	"encoding/json"
 	"fmt"
@@ -14,13 +15,7 @@ import (
 	"sync"
 )
 
-type Expression struct {
-	ID         int
-	Expression string
-	Postfix    []string
-	Status     string
-	Result     int
-}
+type Expression = expression_structs.Expression
 
 type ExpressionItem struct { // структура выражения для вывода в API
 	ID     int
@@ -28,11 +23,7 @@ type ExpressionItem struct { // структура выражения для в�
 	Result int
 }
 
-type Expressions struct {
-	Expressions map[int]*Expression // мапа с очередью выражений
-	Mx          *sync.Mutex
-	LastID      int // последний использованный id
-}
+type Expressions = expression_structs.Expressions
 
 type ExpressionResponse struct { // структура для возврата списка выражений через API
 	Expressions []ExpressionItem
@@ -68,7 +59,7 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	expression := data.Expression
 	postfix, err := evaluation.InfixToPostfix(expression)
 	if err != nil {
-		http.Error(w, "Invalid expression", http.StatusBadRequest)
+		http.Error(w, "Invalid expression: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	expressionsList.Mx.Lock()
@@ -169,7 +160,7 @@ func getExpressionHandler(w http.ResponseWriter, r *http.Request) {
 
 func getTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		task, err := tasksList.GetTask()
+		task, err := tasksList.GetTask(expressionsList)
 		if err != nil {
 			http.Error(w, "No task found", http.StatusNotFound)
 			return
@@ -183,8 +174,9 @@ func getTaskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if r.Method == http.MethodPost {
 		var result struct {
-			ID     int `json:"id"`
-			Result int `json:"result"`
+			ID     int    `json:"id"`
+			Result int    `json:"result"`
+			Error  string `json:"error"`
 		}
 		err := json.NewDecoder(r.Body).Decode(&result)
 		if err != nil {
@@ -204,6 +196,28 @@ func getTaskHandler(w http.ResponseWriter, r *http.Request) {
 		expr, found := expressionsList.Expressions[task.ExpressionID]
 		if !found {
 			http.Error(w, "Expression not found", http.StatusNotFound)
+			return
+		}
+		fmt.Println(result.Error)
+		if result.Error != "" {
+			expr.Status = "Error: " + result.Error
+
+			for _, t := range tasksList.Tasks {
+				if t.ExpressionID == expr.ID {
+					_, err := tasksList.CompleteTask(t.ID)
+					if err != nil {
+						fmt.Printf("Error: %v\n", err)
+					}
+				}
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			_, e := w.Write([]byte(`{}`))
+			if e != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
 			return
 		}
 		for i, v := range expr.Postfix {
