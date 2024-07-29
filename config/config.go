@@ -11,6 +11,7 @@ var (
 	TIME_SUBTRACTION_MS    int
 	TIME_MULTIPLICATION_MS int
 	TIME_DIVISION_MS       int
+	SECRET_KEY             string
 	e                      error
 )
 
@@ -39,4 +40,6 @@ func init() {
 	if e != nil {
 		panic("TIME_DIVISIONS_MS environment variable must be integer")
 	}
+
+	SECRET_KEY = os.Getenv("SECRET_KEY")
 }

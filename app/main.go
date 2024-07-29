@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"distributed_calculator/agent"
 	"distributed_calculator/config"
 	"distributed_calculator/evaluation"
@@ -8,11 +10,14 @@ import (
 	"distributed_calculator/tasks"
 	"encoding/json"
 	"fmt"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
+	_ "github.com/mattn/go-sqlite3"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Expression = expression_structs.Expression
@@ -29,22 +34,31 @@ type ExpressionResponse struct { // структура для возврата �
 	Expressions []ExpressionItem
 }
 
+type User struct {
+	ID       string `json:"id"`
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
 var (
 	expressionsList = NewExpressions()
 	tasksList       = tasks.NewTasks()
+	ctx             = context.TODO()
+	db, db_err      = sql.Open("sqlite3", "store.db")
 )
 
 func NewExpressions() *Expressions {
 	return &Expressions{Mx: &sync.Mutex{}, LastID: 0, Expressions: make(map[int]*Expression)}
 }
 
-func NewExpression(id int, exp string) *Expression {
-	return &Expression{ID: id, Expression: exp, Status: "Processing"}
+func NewExpression(uid int, exp string) *Expression {
+	return &Expression{UserID: uid, Expression: exp, Status: "Processing"}
 }
 
 func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	type RequestData struct {
 		Expression string `json:"expression"`
+		Token      string `json:"token"`
 	}
 	type ResponseData struct {
 		ID string `json:"id"`
@@ -56,18 +70,39 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
+
+	tokenFromString, err := jwt.Parse(data.Token, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte(config.SECRET_KEY), nil
+	})
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest) // 400
+		return
+	}
+
+	uid := 0
+	var e error
+
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		fmt.Println("user name: ")
+		uid, e = strconv.Atoi(fmt.Sprintf("%v", claims["name"]))
+	} else {
+		http.Error(w, err.Error(), http.StatusBadRequest) // 400
+		return
+	}
+
 	expression := data.Expression
 	postfix, err := evaluation.InfixToPostfix(expression)
 	if err != nil {
 		http.Error(w, "Invalid expression: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	expressionsList.Mx.Lock()
-	defer expressionsList.Mx.Unlock()
-	id := expressionsList.LastID + 1
-	newExpression := NewExpression(id, expression)
-	expressionsList.Expressions[id] = newExpression
-	expressionsList.LastID = id
+
+	id, e := insertExpression(NewExpression(uid, expression))
 
 	fmt.Println("Postfix Expression:", strings.Join(postfix, " "))
 
@@ -76,21 +111,40 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 		expressionsList.Mx.Lock()
 		defer expressionsList.Mx.Unlock()
 
-		expression := expressionsList.Expressions[id]
 		if err != nil && err.Error() == "unready warning" {
-			expression.Postfix = newPostfix
+			err := updateExpressionPostfix(id, newPostfix)
+			if err != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError) // 500
+				return
+			}
+			// expression.Postfix = newPostfix
 		} else if err == nil {
 			result, _ := strconv.Atoi(newPostfix[0])
-			expression.Result = result
-			expression.Status = "Done"
+			// expression.Result = result
+			err := updateExpressionResult(id, result)
+			if err != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError) // 500
+				return
+			}
+			// expression.Status = "Done"
+			err = updateExpressionStatus(id, "Done")
+			if err != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError) // 500
+				return
+			}
 		} else {
-			expression.Status = "Error"
+			// expression.Status = "Error"
+			err := updateExpressionStatus(id, "Error")
+			if err != nil {
+				http.Error(w, "Internal server error", http.StatusInternalServerError) // 500
+				return
+			}
 		}
 	}(id, postfix)
 
 	w.WriteHeader(http.StatusCreated) // 201
 	w.Header().Set("Content-Type", "application/json")
-	e := json.NewEncoder(w).Encode(&ResponseData{ID: strconv.Itoa(id)})
+	e = json.NewEncoder(w).Encode(&ResponseData{ID: strconv.Itoa(id)})
 	if e != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError) // 500
 		return
@@ -98,7 +152,31 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(expression)
 }
 
-func getExpressionsHandler(w http.ResponseWriter, _ *http.Request) {
+func getExpressionsHandler(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+
+	fmt.Println(token)
+
+	tokenFromString, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte(config.SECRET_KEY), nil
+	})
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest) // 400
+		return
+	}
+
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		fmt.Println("user name: ", claims["name"])
+	} else {
+		http.Error(w, err.Error(), http.StatusBadRequest) // 400
+		return
+	}
+
 	var expressions []ExpressionItem
 
 	expressionsList.Mx.Lock()
@@ -127,6 +205,28 @@ func getExpressionsHandler(w http.ResponseWriter, _ *http.Request) {
 func getExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	idStr := vars["id"]
+	token := vars["token"]
+
+	tokenFromString, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte(config.SECRET_KEY), nil
+	})
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest) // 400
+		return
+	}
+
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		fmt.Println("user name: ", claims["name"])
+	} else {
+		http.Error(w, err.Error(), http.StatusBadRequest) // 400
+		return
+	}
+
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid ID", http.StatusBadRequest) // 400
@@ -256,18 +356,212 @@ func getTaskHandler(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+	var user User
+	err := json.NewDecoder(r.Body).Decode(&user)
+	if err != nil {
+		http.Error(w, "Invalid data", http.StatusUnprocessableEntity)
+		return
+	}
+
+	_, e := insertUser(&user)
+	if e != nil {
+		http.Error(w, "DB error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK) // 200
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	var user User
+	err := json.NewDecoder(r.Body).Decode(&user)
+	if err != nil {
+		http.Error(w, "Invalid data", http.StatusUnprocessableEntity)
+		return
+	}
+
+	user, e := getUser(user.Login, user.Password)
+	if e != nil {
+		http.Error(w, "Get user error", http.StatusInternalServerError)
+		return
+	}
+
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"name": user.Login,
+		"nbf":  now.Unix(),
+		"exp":  now.Add(5 * time.Minute).Unix(),
+		"iat":  now.Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(config.SECRET_KEY))
+
+	response := struct {
+		Token string `json:"token"`
+	}{
+		Token: tokenString,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	e = json.NewEncoder(w).Encode(response)
+
+	if e != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError) // 500
+		return
+	}
+}
+
+func createTables() error {
+	const (
+		usersTable = `
+	CREATE TABLE IF NOT EXISTS users(
+		id INTEGER PRIMARY KEY AUTOINCREMENT, 
+		login TEXT,
+		password TEXT
+	);`
+
+		expressionsTable = `
+	CREATE TABLE IF NOT EXISTS expressions(
+		id INTEGER PRIMARY KEY AUTOINCREMENT, 
+		user_id INTEGER NOT NULL,
+		expression TEXT NOT NULL,
+		status TEXT,
+	
+		FOREIGN KEY (user_id)  REFERENCES expressions (id)
+	);`
+	)
+
+	if _, err := db.ExecContext(ctx, usersTable); err != nil {
+		return err
+	}
+
+	if _, err := db.ExecContext(ctx, expressionsTable); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func insertExpression(expression *Expression) (int, error) {
+	var q = `
+	INSERT INTO expressions (expression, user_id, status) values ($1, $2, "Processing...")
+	`
+	result, err := db.ExecContext(ctx, q, expression.Expression, expression.UserID)
+	if err != nil {
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	return int(id), nil
+}
+
+func getExpression(id int) *Expression {
+	var q = "SELECT id, user_id, expression, status, result FROM expressions WHERE id=$1"
+	rows, err := db.QueryContext(ctx, q, id)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		expr := Expression{}
+		err := rows.Scan(&expr.ID, &expr.UserID, &expr.Expression, &expr.Status, &expr.Result)
+		if err != nil {
+			return nil
+		}
+		return &expr
+	}
+	return nil
+}
+
+func updateExpressionPostfix(id int, postfix []string) error {
+	var q = "UPDATE expressions SET postfix=$1 WHERE id=$2"
+	_, err := db.ExecContext(ctx, q, strings.Join(postfix, " "), id)
+	return err
+}
+
+func updateExpressionResult(id, result int) error {
+	var q = "UPDATE expressions SET result=$1 WHERE id=$2"
+	_, err := db.ExecContext(ctx, q, result, id)
+	return err
+}
+
+func updateExpressionStatus(id int, status string) error {
+	var q = "UPDATE expressions SET status=$1 WHERE id=$2"
+	_, err := db.ExecContext(ctx, q, status, id)
+	return err
+}
+
+func insertUser(user *User) (int64, error) {
+	var q = `
+	INSERT INTO users (login, password) values ($1, $2)
+	`
+	result, err := db.ExecContext(ctx, q, user.Login, user.Password)
+	if err != nil {
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	return id, nil
+}
+
+func getUser(login, password string) (User, error) {
+	var q = "SELECT id, login, password FROM users WHERE login=$1 AND password=$2"
+	rows, err := db.QueryContext(ctx, q, login, password)
+	if err != nil {
+		return User{}, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		u := User{}
+		err := rows.Scan(&u.ID, &u.Login, &u.Password)
+		if err != nil {
+			return User{}, err
+		}
+		return u, nil
+	}
+	return User{}, fmt.Errorf("Not found")
+}
+
 func main() {
+	if db_err != nil {
+		panic(db_err)
+	}
+	defer db.Close()
+
+	err := db.PingContext(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	if err = createTables(); err != nil {
+		panic(err)
+	}
+
 	r := mux.NewRouter()
 	r.HandleFunc("/api/v1/calculate", addExpressionHandler).Methods("POST")
 	r.HandleFunc("/api/v1/expressions", getExpressionsHandler).Methods("GET")
 	r.HandleFunc("/api/v1/expressions/{id}", getExpressionHandler).Methods("GET")
 	r.HandleFunc("/internal/task", getTaskHandler).Methods("GET", "POST")
 
+	r.HandleFunc("/api/v1/register", registerHandler).Methods("POST")
+	r.HandleFunc("/api/v1/login", loginHandler).Methods("POST")
+
 	for i := 0; i < config.COMPUTING_POWER; i++ {
 		go agent.Worker()
 	}
 
-	err := http.ListenAndServe(":8080", r)
+	err = http.ListenAndServe(":8080", r)
 	if err != nil {
 		panic(err)
 	}
